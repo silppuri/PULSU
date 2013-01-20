@@ -1,0 +1,10 @@
+# Ignore all
+*
+# Except
+!.gitignore
+!main.asm
+!README.md
+!null.hex
+
+# Mac crap
+!.DS_Store
