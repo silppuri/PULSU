@@ -16,10 +16,10 @@
 ;     DisplayC
 ;       T40
 ;   BlinkAlive
-;   Pbutton
-;   PBToggle
-;     DisplayC
-;       T40
+;   Button
+;   	ButtonToggle
+;     		DisplayC
+;       		T40
 ;   RPG
 ;   RPGCounter
 ;     HexDisplay
@@ -121,8 +121,7 @@ L1
 	btg    PORTB,RB0             ; Toggles the B0/INT0 pin to measure the total time.  Should be 10ms.
 	rcall  BlinkAlive            ; Blinks the D2 LED every 2.5 seconds.
 	rcall  Button            ; Checks to see if SW3 is pushed or not.
-	; rcall  PushButtonToggle             ; If SW3 is pushed, toggle D6.
-	; rcall  RPG                   ; Tests whether or not the RPG turned.
+	rcall  RPG                   ; Tests whether or not the RPG turned.
 	; rcall  RPGCounter            ; Updates VALUE according to DELRPG. 
 	; rcall  ReadPot               ; Reads the current value of the POT through the A/D converter.
 	; rcall  PotToDAC              ; Sends the value of the POT and its complement to the DAC, 
@@ -153,7 +152,7 @@ Initial
 	MOVLF B'01100001', CCPR1H      ; Set the comparator to 25,000.
 	MOVLF B'10101000', CCPR1L	
                                        ; Initialize variables for RPG and PButton subroutines.
-	;movff PORTD, OLDPORTD          ; Initialize "old" value for RPG.
+	movff PORTD, OLDPORTD          ; Initialize "old" value for RPG.
 	;clrf RPGCNT                    ; Initialize the RPG counter.
 
 	;MOVLF B'00001000', PBSTATE     ; Initialize pushbutton states.
@@ -322,6 +321,45 @@ mode_l5
 	rcall DisplayC
 	return
 
+;;;;;;; RPG subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; This subroutine decyphers RPG changes into values of DELRPG of 0, +1, or -1.
+; DELRPG = +1 for CW change, 0 for no change, and -1 for CCW change.
+; (demo4.asm used for reference)
+
+RPG
+	movf	RPGCNT, W		; copy RPGCNT to Working registry
+	btfss	STATUS, Z		; skip if zero
+	decf	RPGCNT			; if not zero, decrement
+	bcf		PORTA, RA3
+	clrf	DELRPG			; clear for no change return value
+	movf	PORTD, W		; copy portd to W
+	movwf	TEMP			; move portd to temp
+	xorwf	OLDPORTD, W		; any changes ?
+	andlw	B'00000011'		; if not set Z flag
+	; if not zero
+		rrcf OLDPORTD, W
+		; if carry
+			bnc L9
+			bcf WREG, 1
+		; else
+			bra L10
+L9
+			bsf WREG, 1
+		;endif
+L10
+	xorwf TEMP, W		; did the rpg change
+	andlw B'00000011'
+	; if zero DELRPG = -1 ccw
+		bnz L11
+		decf DELRPG, F
+	; else
+		bra L12
+L11
+	incf DELRPG, F
+L12
+	; endif
+	return
 ;;;;;;; BlinkAlive subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ; This subroutine briefly blinks the LED next to the PIC every two-and-a-half
