@@ -56,7 +56,7 @@ cblock  0x000                  	; Beginning of Access RAM
                                    	;  (-1 for left or +1 for right).
 	OLDPORTD                   	; Holds the old value of PortD to compare with
                                    	;  the new value. Used in RPG.
-	OLDBUTTON                    	; Byte that holds old button state.
+	OLDBUTTON                   ; Byte that holds old button state.
 	MODE						; holds mode state. 0 = OFF, 1 = SIN, 2=SQUARE, 3=TRI
 	PBCOUNT                    	; Used in PButton subroutine.  If it's less than
                                    	;  PBthresh, then ISC is set.  Otherwise, ISA is set.
@@ -122,7 +122,7 @@ L1
 	rcall  BlinkAlive            ; Blinks the D2 LED every 2.5 seconds.
 	rcall  Button            ; Checks to see if SW3 is pushed or not.
 	rcall  RPG                   ; Tests whether or not the RPG turned.
-	; rcall  RPGCounter            ; Updates VALUE according to DELRPG. 
+	rcall  RPGCounter            ; Updates VALUE according to DELRPG. 
 	; rcall  ReadPot               ; Reads the current value of the POT through the A/D converter.
 	; rcall  PotToDAC              ; Sends the value of the POT and its complement to the DAC, 
 	rcall  LoopTime              ; The remainder of the 10ms is spent in here by using Timer1.
@@ -304,23 +304,37 @@ mode_logic
 mode_l1
 	POINT NAME
 	MOVLF D'0', MODE
-	bra mode_l5
+	bra no_wave
 mode_l2
 	POINT SIN
 	MOVLF D'1', MODE
-	bra mode_l5		
+	bra sine_wave		
 mode_l3
 	POINT SQARE
 	MOVLF D'2', MODE
-	bra mode_l5
+	bra square_wave
 mode_l4
 	POINT TRIANG
 	MOVLF D'3', MODE
-	bra mode_l5
-mode_l5
+	bra triang_wave
+no_wave
 	rcall DisplayC
 	return
 
+;sine_wave
+sine_wave
+	rcall DisplayC
+	return
+
+;trianle wave
+triang_wave
+	rcall DisplayC
+	return
+
+;square wave
+square_wave
+	rcall DisplayC
+	return
 ;;;;;;; RPG subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ; This subroutine decyphers RPG changes into values of DELRPG of 0, +1, or -1.
@@ -328,38 +342,132 @@ mode_l5
 ; (demo4.asm used for reference)
 
 RPG
-	movf	RPGCNT, W		; copy RPGCNT to Working registry
-	btfss	STATUS, Z		; skip if zero
-	decf	RPGCNT			; if not zero, decrement
-	bcf		PORTA, RA3
-	clrf	DELRPG			; clear for no change return value
-	movf	PORTD, W		; copy portd to W
-	movwf	TEMP			; move portd to temp
-	xorwf	OLDPORTD, W		; any changes ?
-	andlw	B'00000011'		; if not set Z flag
-	; if not zero
-		rrcf OLDPORTD, W
-		; if carry
-			bnc L9
-			bcf WREG, 1
-		; else
-			bra L10
+	movf   RPGCNT,w		       ; Copy RPGCNT to W.
+	btfss  STATUS, Z	       ; skip if zero
+	decf   RPGCNT		       ; if not zero, decrement
+	bcf    PORTA,RA3
+        clrf   DELRPG                  ; Clear for "no change" return value.
+        movf   PORTD,W                 ; Copy PORTD into W.
+        movwf  TEMP                    ;  and TEMP.
+        xorwf  OLDPORTD,W              ; Any change?
+        andlw  B'00000011'             ; If not, set the Z flag.
+        ;IF_  .NZ.                     ; If the two bits have changed then...
+        bz	L8
+          rrcf OLDPORTD,W              ; Form what a CCW change would produce.
+          ;IF_  .C.                    ; Make new bit 1 = complement of old bit 0.
+          bnc	L9
+            bcf  WREG,1
+          ;ELSE_
+          bra	L10
 L9
-			bsf WREG, 1
-		;endif
+            bsf  WREG,1
+          ;ENDIF_
 L10
-	xorwf TEMP, W		; did the rpg change
-	andlw B'00000011'
-	; if zero DELRPG = -1 ccw
-		bnz L11
-		decf DELRPG, F
-	; else
-		bra L12
+          xorwf  TEMP,W                ; Did the RPG actually change to this output?
+          andlw  B'00000011'
+          ;IF_  .Z.                    ; If so, then change  DELRPG to -1 for CCW.
+          bnz	L11
+            decf DELRPG,F
+          ;ELSE_                       ; Otherwise, change DELRPG to  +1 for CW.
+          bra	L12
 L11
-	incf DELRPG, F
+            incf DELRPG,F
+          ;ENDIF_
 L12
-	; endif
+        ;ENDIF_
+	movf   RPGCNT,w		       ; Copy RPGCNT to W.
+	btfsc  STATUS, Z	       ; skip if not zero
+	bra    CNTUPDATE	       ; 	
+	bsf    PORTA,RA3	       ; Flash D4, for a fast turn of the RPG.
+	bcf    STATUS,C		       ; Shift value 3 times to left = multiply by 8
+	rlcf   DELRPG		       ; Carry is forced to 0.
+	bcf    STATUS,C
+	rlcf   DELRPG 
+	bcf    STATUS,C
+	rlcf   DELRPG 		       ; *****
+
+CNTUPDATE
+	MOVLF	RGPTresh, RPGCNT       ; set RGPCNT to treshold		
+L8
+        movff  TEMP,OLDPORTD           ; Save PORTD as OLDPORTD for ten ms from now.
+        return
+
+;;;;;;; RPGCounter subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Updates the VALUE according to DELRPG
+RPGCounter
+	movf	DELRPG, W
+	addwf	VALUE			; add DELRPG and VALUE
+	MOVLF	0x86, HEXSTR	; cursor position byte
+	movff	VALUE, BYTE		; load result to BYTE
+	rcall	HexDisplay
 	return
+;;;;;; HexDisplay subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; This subroutine takes in BYTE and converts into an ASCII string in hex and stores it into
+; HEXSTR for display.
+
+HexDisplay
+        rcall ConvertLowerNibble       ; Converts lower nibble of BYTE to hex and stores it in W.
+        movwf HEXSTR+2                 ; Move the ASCII value into the most significant byte of HEXSTR.
+
+        swapf BYTE,F                   ; Swap nibbles of BYTE to convert the upper nibble.
+
+        rcall ConvertLowerNibble       ; Convert the old upper nibble of BYTE to hex and stores it in W.
+        movwf HEXSTR+1                 ; Move the ASCII value into the 2nd byte of HEXSTR.
+
+        lfsr  0, HEXSTR                ; Loads address of HEXSTR to fsr0 to display HEXSTR.
+        rcall DisplayV                 ; Call DisplayV to display HEXSTR on LCD.
+        return
+
+;;;;;; ConvertLowerNibble subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; This subroutine takes lower nibble of BYTE and converts it into its ASCII hex value.
+
+ConvertLowerNibble                              
+        movf BYTE, W                   ; Loads BYTE into W.
+        andlw B'00001111'              ; Masks out the upper nibble.
+        sublw 0x09                     ; Test if it's greater than 9. 
+        ;IF_ .N.                       ; If, after masking, it is greater than 9, then it is a letter.
+        bnn	L30
+          movf BYTE,W                  ; Load BYTE into W.
+          andlw B'00001111'            ; Mask out the upper nibble.
+          addlw 0x37                   ; Add offset to obtain the letter's ASCII value.
+        ;ELSE_                         ; If it's less than 9, then it's a number.
+        bra	L31
+L30
+          movf BYTE,W
+          andlw B'00001111'
+          iorlw 0x30                   ; Then add offset of 30 to obtain the numeric's ASCII value.
+        ;ENDIF_
+L31
+        return
+
+;;;;;;; DisplayV subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; This subroutine is called with FSR0 containing the address of a variable
+; display string.  It sends the bytes of the string to the LCD.  The first
+; byte sets the cursor position.  The remaining bytes are displayed, beginning
+; at that position.
+	
+DisplayV
+        bcf  PORTE,0                   ; Drive RS pin low for cursor positioning code.
+        ;REPEAT_
+L7
+          bsf   PORTE,1                ; Drive E pin high.
+          movff INDF0,PORTD            ; Send upper nibble.
+          bcf   PORTE,1                ; Drive E pin low so LCD will accept nibble.
+          bsf   PORTE,1                ; Drive E pin high again.
+          swapf INDF0,W                ; Swap nibbles.
+          movwf PORTD                  ; Write lower nibble.
+          bcf   PORTE,1                ; Drive E pin low so LCD will process byte.
+          rcall T40                    ; Wait 40 usec.
+          bsf   PORTE,0                ; Drive RS pin high for displayable characters.
+          movf  PREINC0,W              ; Increment pointer, then get next byte.
+        ;UNTIL_  .Z.                   ; Is it zero?
+        bnz	L7
+RL7
+        return
 ;;;;;;; BlinkAlive subroutine ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
 ; This subroutine briefly blinks the LED next to the PIC every two-and-a-half
@@ -394,7 +502,7 @@ RL46
 
 LCDStr  db  0x33,0x32,0x28,0x01,0x0c,0x06,0x00  ; Initialization string for LCD.
 NAME	db  0x80,'P','U','L','S','U',' ',0x00
-SIN		db  0x80,'S','I','N',' ',' ',' ',0x00   ; Declaration of name string on LCD (max 6 chars).
+SIN	db  0x80,'S','I','N',' ',' ',' ',0x00   ; Declaration of name string on LCD (max 6 chars).
 SQARE  	db  0x80,'S','Q','U','A','R','E',0x00	; All strings must be of same lenght, 
 TRIANG  db  0x80,'T','R','I','A','N','G',0x00	; else the last letters of previous line
 
